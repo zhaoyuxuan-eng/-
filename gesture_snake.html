@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手势贪吃蛇</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+        #score {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="score">分数: 0</div>
+        <video id="video" autoplay playsinline></video>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script>
+        // 游戏常量
+        const SNAKE_SPEED = 10;
+        const SEGMENT_SIZE = 10;
+        const APPLE_SIZE = 15;
+        const TRAIL_LENGTH = 10;
+
+        // 游戏变量
+        let snake = [];
+        let apple = {};
+        let score = 0;
+        let gameRunning = false;
+        let fingerX = 0;
+        let fingerY = 0;
+        let canvasWidth = 0;
+        let canvasHeight = 0;
+
+        // 获取DOM元素
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+
+        // 初始化MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        // 处理手势检测结果
+        hands.onResults(onResults);
+
+        // 初始化摄像头
+        const camera = new Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 800,
+            height: 600
+        });
+
+        // 初始化游戏
+        function initGame() {
+            // 设置canvas尺寸
+            canvasWidth = window.innerWidth;
+            canvasHeight = window.innerHeight;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+
+            // 初始化蛇
+            snake = [];
+            for (let i = TRAIL_LENGTH; i >= 0; i--) {
+                snake.push({
+                    x: canvasWidth / 2 - i * SEGMENT_SIZE,
+                    y: canvasHeight / 2
+                });
+            }
+
+            // 生成第一个苹果
+            generateApple();
+
+            // 开始游戏循环
+            gameRunning = true;
+            gameLoop();
+        }
+
+        // 生成苹果
+        function generateApple() {
+            // 确保苹果不会生成在屏幕边缘，留出足够空间让蛇吃到
+            const margin = APPLE_SIZE * 2;
+            apple = {
+                x: margin + Math.random() * (canvasWidth - margin * 2),
+                y: margin + Math.random() * (canvasHeight - margin * 2)
+            };
+        }
+
+        // 处理手势结果
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const handLandmarks = results.multiHandLandmarks[0];
+                const indexFinger = handLandmarks[8]; // 食指尖
+
+                // 转换坐标到canvas，确保坐标在有效范围内
+                fingerX = Math.max(0, Math.min(indexFinger.x * canvasWidth, canvasWidth));
+                fingerY = Math.max(0, Math.min(indexFinger.y * canvasHeight, canvasHeight));
+            }
+        }
+
+        // 游戏主循环
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            // 更新蛇头位置（跟随手指）
+            const head = {
+                x: fingerX,
+                y: fingerY
+            };
+
+            // 添加新的蛇头
+            snake.unshift(head);
+
+            // 保持蛇的长度
+            if (snake.length > TRAIL_LENGTH + score) {
+                snake.pop();
+            }
+
+            // 检测碰撞苹果
+            if (checkCollision(head, apple, SEGMENT_SIZE, APPLE_SIZE)) {
+                score++;
+                scoreElement.textContent = `分数: ${score}`;
+                generateApple();
+            }
+
+            // 绘制游戏
+            drawGame();
+
+            // 继续游戏循环
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 检测碰撞
+        function checkCollision(obj1, obj2, size1, size2) {
+            const dx = obj1.x - obj2.x;
+            const dy = obj1.y - obj2.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            // 增加碰撞检测阈值，确保在屏幕边缘也能吃到苹果
+            return distance < (size1 + size2);
+        }
+
+        // 绘制游戏
+        function drawGame() {
+            // 清空画布
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // 绘制蛇
+            for (let i = 0; i < snake.length; i++) {
+                const segment = snake[i];
+                const opacity = i / snake.length;
+                const size = SEGMENT_SIZE * opacity + 5;
+
+                ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+                ctx.beginPath();
+                ctx.arc(segment.x, segment.y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 绘制苹果
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(apple.x, apple.y, APPLE_SIZE, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 初始化手指位置为屏幕中心
+        fingerX = window.innerWidth / 2;
+        fingerY = window.innerHeight / 2;
+
+        // 启动摄像头
+        camera.start();
+
+        // 立即初始化游戏
+        initGame();
+    </script>
+</body>
+</html>
